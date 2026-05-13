@@ -8,8 +8,11 @@ from pathlib import Path
 from typing import List
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repository import save_many, save_screening_result
+from app.db.session import get_session
 from app.models.schemas import (
     BatchScreenRequest,
     DailyScreeningSummary,
@@ -17,6 +20,7 @@ from app.models.schemas import (
     ScreeningResult,
     TickerUniverse,
 )
+from app.services.alerts import maybe_send_alert
 from app.services.quality_checker import check_cash_flow_quality
 from app.services.screener import calculate_altman_z_score, calculate_piotroski_fscore
 from app.services.valuation import calculate_dcf_valuation
@@ -56,7 +60,10 @@ async def _run_full_analysis(ticker: str) -> ScreeningResult:
 
 
 @router.post("/{ticker}", response_model=ScreeningResult, summary="Analyse a single ticker")
-async def screen_single_ticker(ticker: str) -> ScreeningResult:
+async def screen_single_ticker(
+    ticker: str,
+    session: AsyncSession = Depends(get_session),
+) -> ScreeningResult:
     """Full value investing analysis for one stock ticker."""
     try:
         clean = validate_ticker(ticker)
@@ -64,14 +71,23 @@ async def screen_single_ticker(ticker: str) -> ScreeningResult:
         raise HTTPException(status_code=422, detail=str(exc))
 
     try:
-        return await _run_full_analysis(clean)
+        result = await _run_full_analysis(clean)
+        # Persist and alert in background (don't block the response)
+        await asyncio.gather(
+            save_screening_result(session, result),
+            maybe_send_alert(result),
+        )
+        return result
     except Exception as exc:
         logger.error("Screening failed for %s: %s", clean, exc)
         return ScreeningResult(ticker=clean, error=str(exc))
 
 
 @router.post("/batch", response_model=DailyScreeningSummary, summary="Batch screen a list of tickers")
-async def batch_screen(request: BatchScreenRequest) -> DailyScreeningSummary:
+async def batch_screen(
+    request: BatchScreenRequest,
+    session: AsyncSession = Depends(get_session),
+) -> DailyScreeningSummary:
     """
     Screen multiple tickers concurrently.
     Returns a daily summary with top opportunities.
@@ -84,7 +100,6 @@ async def batch_screen(request: BatchScreenRequest) -> DailyScreeningSummary:
         except ValueError as exc:
             errors.append(str(exc))
 
-    # Process with bounded concurrency (avoid hammering yfinance)
     semaphore = asyncio.Semaphore(5)
 
     async def safe_screen(t: str) -> ScreeningResult:
@@ -123,26 +138,35 @@ async def batch_screen(request: BatchScreenRequest) -> DailyScreeningSummary:
     top.sort(key=lambda r: (r.passes_filters, r.financials.z_score or 0), reverse=True)
     summary.top_opportunities = top[:10]
 
+    # Persist all results and fire alerts concurrently
+    valid_results = [r for r in results if not r.error]
+    alert_tasks = [maybe_send_alert(r) for r in valid_results]
+    await asyncio.gather(
+        save_many(session, valid_results),
+        *alert_tasks,
+    )
+
     return summary
 
 
-@router.get("/opportunities/top", response_model=List[ScreeningResult], summary="Get best opportunities from full universe")
+@router.get("/opportunities/top", response_model=List[ScreeningResult], summary="Top opportunities from full universe")
 async def get_top_opportunities(
     min_z_score: float = Query(2.0, ge=0, description="Minimum Altman Z-Score"),
     min_f_score: int = Query(6, ge=0, le=9, description="Minimum Piotroski F-Score"),
     limit: int = Query(20, ge=1, le=100),
+    session: AsyncSession = Depends(get_session),
 ) -> List[ScreeningResult]:
     """
     Screens the full ticker universe and returns top value opportunities.
-    NOTE: this is a slow endpoint (~minutes for S&P500). Use batch-screen for subsets.
+    NOTE: slow endpoint (~minutes for full S&P 500). Use /screen/batch for subsets.
     """
     universe = _load_universe()
-    tickers = universe.all_tickers[:limit * 5]  # over-fetch then filter
+    tickers = universe.all_tickers[:limit * 5]
 
     request = BatchScreenRequest(
         tickers=tickers, min_z_score=min_z_score, min_f_score=min_f_score
     )
-    summary = await batch_screen(request)
+    summary = await batch_screen(request, session)
     return summary.top_opportunities[:limit]
 
 
@@ -172,11 +196,10 @@ async def _fetch_sp500_tickers() -> List[str]:
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(url)
         resp.raise_for_status()
-    # Parse the first wikitable
     import re
     pattern = r'<td><a href="/wiki/[^"]*" title="[^"]*">([A-Z]+(?:\.[A-Z])?)</a></td>'
     tickers = re.findall(pattern, resp.text)
-    return list(dict.fromkeys(tickers))  # deduplicate preserving order
+    return list(dict.fromkeys(tickers))
 
 
 def _default_sp500_sample() -> List[str]:
