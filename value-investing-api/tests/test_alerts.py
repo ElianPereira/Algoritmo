@@ -1,5 +1,5 @@
 """
-Unit tests for alerts.py — Telegram alert logic.
+Unit tests for alerts.py — WhatsApp alert logic via Twilio.
 """
 from __future__ import annotations
 
@@ -10,8 +10,15 @@ import pytest
 from app.models.schemas import CashFlowQuality, FinancialMetrics, RiskLevel, ScreeningResult
 from app.services.alerts import maybe_send_alert, send_alert, should_alert
 
+TWILIO_ENV = {
+    "TWILIO_ACCOUNT_SID": "ACtest123",
+    "TWILIO_AUTH_TOKEN": "authtoken456",
+    "TWILIO_FROM_WHATSAPP": "whatsapp:+14155238886",
+    "TWILIO_TO_WHATSAPP": "whatsapp:+521234567890",
+}
 
-def _make_result(z_score=3.5, f_score=8, cf_ratio=1.2, passes=True) -> ScreeningResult:
+
+def _make_result(z_score=3.5, f_score=8, cf_ratio=1.2) -> ScreeningResult:
     return ScreeningResult(
         ticker="TEST",
         company_name="Test Corp",
@@ -53,13 +60,20 @@ class TestShouldAlert:
 class TestSendAlert:
     @pytest.mark.asyncio
     async def test_skips_when_no_credentials(self):
-        """Should return False silently when env vars not set."""
+        """Returns False silently when Twilio env vars not set."""
         result = _make_result()
-        with patch.dict("os.environ", {}, clear=True):
-            # Remove any existing TELEGRAM vars
-            import os
-            os.environ.pop("TELEGRAM_BOT_TOKEN", None)
-            os.environ.pop("TELEGRAM_CHAT_ID", None)
+        import os
+        for key in TWILIO_ENV:
+            os.environ.pop(key, None)
+        sent = await send_alert(result)
+        assert sent is False
+
+    @pytest.mark.asyncio
+    async def test_skips_when_partially_configured(self):
+        """Even one missing credential should prevent sending."""
+        result = _make_result()
+        partial = {"TWILIO_ACCOUNT_SID": "ACtest", "TWILIO_AUTH_TOKEN": "tok"}
+        with patch.dict("os.environ", partial):
             sent = await send_alert(result)
         assert sent is False
 
@@ -68,6 +82,7 @@ class TestSendAlert:
         result = _make_result()
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
+        mock_response.json = MagicMock(return_value={"sid": "SM123"})
 
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -75,17 +90,43 @@ class TestSendAlert:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with (
-            patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "token123", "TELEGRAM_CHAT_ID": "456"}),
+            patch.dict("os.environ", TWILIO_ENV),
             patch("app.services.alerts.httpx.AsyncClient", return_value=mock_client),
         ):
             sent = await send_alert(result)
 
         assert sent is True
         mock_client.post.assert_called_once()
-        call_kwargs = mock_client.post.call_args
-        body = call_kwargs.kwargs.get("json") or call_kwargs.args[1] if call_kwargs.args else call_kwargs.kwargs["json"]
-        assert "TEST" in body["text"]
-        assert body["chat_id"] == "456"
+        call_args = mock_client.post.call_args
+        # Verify correct Twilio endpoint
+        assert "ACtest123" in call_args.args[0]
+        # Verify form-encoded body (data=), not JSON
+        body = call_args.kwargs["data"]
+        assert body["From"] == "whatsapp:+14155238886"
+        assert body["To"] == "whatsapp:+521234567890"
+        assert "TEST" in body["Body"]
+
+    @pytest.mark.asyncio
+    async def test_uses_basic_auth(self):
+        """Twilio requires HTTP Basic Auth with (account_sid, auth_token)."""
+        result = _make_result()
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json = MagicMock(return_value={"sid": "SM456"})
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with (
+            patch.dict("os.environ", TWILIO_ENV),
+            patch("app.services.alerts.httpx.AsyncClient", return_value=mock_client),
+        ):
+            await send_alert(result)
+
+        call_kwargs = mock_client.post.call_args.kwargs
+        assert call_kwargs["auth"] == ("ACtest123", "authtoken456")
 
     @pytest.mark.asyncio
     async def test_returns_false_on_http_error(self):
@@ -96,12 +137,12 @@ class TestSendAlert:
         mock_client.post = AsyncMock(side_effect=Exception("connection refused"))
 
         with (
-            patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "tok", "TELEGRAM_CHAT_ID": "1"}),
+            patch.dict("os.environ", TWILIO_ENV),
             patch("app.services.alerts.httpx.AsyncClient", return_value=mock_client),
         ):
             sent = await send_alert(result)
 
-        assert sent is False  # graceful failure
+        assert sent is False
 
 
 class TestMaybeSendAlert:

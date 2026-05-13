@@ -13,9 +13,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cache_ttl_seconds: int = 86400
 
-    # Telegram alerts
-    telegram_bot_token: str = ""
-    telegram_chat_id: str = ""
+    # WhatsApp alerts via Twilio
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_from_whatsapp: str = ""   # e.g. whatsapp:+14155238886
+    twilio_to_whatsapp: str = ""     # e.g. whatsapp:+521234567890
     z_score_alert_threshold: float = 3.0
     f_score_alert_threshold: int = 7
 
