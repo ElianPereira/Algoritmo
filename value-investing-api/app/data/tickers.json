@@ -1,0 +1,19 @@
+{
+  "sp500": [
+    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "BRK-B", "LLY", "TSLA",
+    "AVGO", "JPM", "UNH", "V", "XOM", "MA", "HD", "PG", "COST", "JNJ", "MRK",
+    "ABBV", "CVX", "KO", "BAC", "PEP", "ORCL", "ACN", "TMO", "MCD", "NFLX",
+    "CRM", "AMD", "ADBE", "CSCO", "IBM", "INTC", "QCOM", "TXN", "AMAT", "LRCX",
+    "GE", "CAT", "DE", "BA", "HON", "MMM", "RTX", "LMT", "NOC", "GD",
+    "WMT", "TGT", "AMGN", "GILD", "BMY", "PFE", "MDT", "ABT", "SYK", "BDX",
+    "GS", "MS", "BLK", "SCHW", "AXP", "USB", "WFC", "C", "PNC", "TFC",
+    "NEE", "DUK", "SO", "D", "EXC", "AEP", "SRE", "PCG", "ETR", "FE",
+    "AMT", "PLD", "CCI", "EQIX", "SPG", "O", "AVB", "EQR", "PSA", "WY"
+  ],
+  "bmv": [
+    "WALMEX.MX", "FEMSA.MX", "GFNORTEO.MX", "AMXL.MX", "CEMEXCPO.MX",
+    "GMEXICOB.MX", "BIMBOA.MX", "GRUMAB.MX", "ALSEA.MX", "AC.MX",
+    "KIMBERA.MX", "GCARSOA1.MX", "ASURB.MX", "OMAB.MX", "BOLSAA.MX",
+    "GENTERA.MX", "VESTA.MX", "FIBRAPL.MX", "TERRA13.MX", "FUNO11.MX"
+  ]
+}
