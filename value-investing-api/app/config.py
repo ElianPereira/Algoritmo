@@ -13,11 +13,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cache_ttl_seconds: int = 86400
 
-    # WhatsApp alerts via Twilio
-    twilio_account_sid: str = ""
-    twilio_auth_token: str = ""
-    twilio_from_whatsapp: str = ""   # e.g. whatsapp:+14155238886
-    twilio_to_whatsapp: str = "whatsapp:+529992689400"
+    # Email alerts via Gmail SMTP
+    smtp_user: str = "pereiraelian18@gmail.com"
+    smtp_password: str = ""   # set via Railway env var: SMTP_PASSWORD
     z_score_alert_threshold: float = 3.0
     f_score_alert_threshold: int = 7
 

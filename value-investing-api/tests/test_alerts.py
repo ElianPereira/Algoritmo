@@ -1,20 +1,19 @@
 """
-Unit tests for alerts.py — WhatsApp alert logic via Twilio.
+Unit tests for alerts.py — Gmail email alert logic.
 """
 from __future__ import annotations
 
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.models.schemas import CashFlowQuality, FinancialMetrics, RiskLevel, ScreeningResult
+from app.models.schemas import CashFlowQuality, FinancialMetrics, ScreeningResult
 from app.services.alerts import maybe_send_alert, send_alert, should_alert
 
-TWILIO_ENV = {
-    "TWILIO_ACCOUNT_SID": "ACtest123",
-    "TWILIO_AUTH_TOKEN": "authtoken456",
-    "TWILIO_FROM_WHATSAPP": "whatsapp:+14155238886",
-    "TWILIO_TO_WHATSAPP": "whatsapp:+521234567890",
+SMTP_ENV = {
+    "SMTP_USER": "pereiraelian18@gmail.com",
+    "SMTP_PASSWORD": "test_app_password",
 }
 
 
@@ -31,117 +30,104 @@ def _make_result(z_score=3.5, f_score=8, cf_ratio=1.2) -> ScreeningResult:
 
 class TestShouldAlert:
     def test_triggers_when_all_thresholds_met(self):
-        result = _make_result(z_score=3.5, f_score=8)
-        assert should_alert(result) is True
+        assert should_alert(_make_result(z_score=3.5, f_score=8)) is True
 
     def test_does_not_trigger_below_z_threshold(self):
-        result = _make_result(z_score=2.5, f_score=8)
-        assert should_alert(result) is False
+        assert should_alert(_make_result(z_score=2.5, f_score=8)) is False
 
     def test_does_not_trigger_below_f_threshold(self):
-        result = _make_result(z_score=3.5, f_score=6)
-        assert should_alert(result) is False
+        assert should_alert(_make_result(z_score=3.5, f_score=6)) is False
 
     def test_does_not_trigger_when_fails_filters(self):
-        # CF ratio < 0.8 → passes_filters will be False
-        result = _make_result(z_score=3.5, f_score=8, cf_ratio=0.5)
-        assert should_alert(result) is False
+        # CF ratio < 0.8 → passes_filters=False
+        assert should_alert(_make_result(z_score=3.5, f_score=8, cf_ratio=0.5)) is False
 
     def test_boundary_z_score_exactly_3(self):
-        """Z-Score exactly 3.0 must NOT trigger (requires strictly > 3.0)."""
-        result = _make_result(z_score=3.0, f_score=8)
-        assert should_alert(result) is False
+        """Z=3.0 must NOT trigger (strictly > 3.0 required)."""
+        assert should_alert(_make_result(z_score=3.0, f_score=8)) is False
 
     def test_boundary_z_score_just_above_3(self):
-        result = _make_result(z_score=3.001, f_score=8)
-        assert should_alert(result) is True
+        assert should_alert(_make_result(z_score=3.001, f_score=8)) is True
 
 
 class TestSendAlert:
     @pytest.mark.asyncio
     async def test_skips_when_no_credentials(self):
-        """Returns False silently when Twilio env vars not set."""
         result = _make_result()
-        import os
-        for key in TWILIO_ENV:
-            os.environ.pop(key, None)
+        os.environ.pop("SMTP_USER", None)
+        os.environ.pop("SMTP_PASSWORD", None)
         sent = await send_alert(result)
         assert sent is False
 
     @pytest.mark.asyncio
-    async def test_skips_when_partially_configured(self):
-        """Even one missing credential should prevent sending."""
+    async def test_skips_when_password_missing(self):
         result = _make_result()
-        partial = {"TWILIO_ACCOUNT_SID": "ACtest", "TWILIO_AUTH_TOKEN": "tok"}
-        with patch.dict("os.environ", partial):
+        with patch.dict("os.environ", {"SMTP_USER": "a@b.com"}, clear=False):
+            os.environ.pop("SMTP_PASSWORD", None)
             sent = await send_alert(result)
         assert sent is False
 
     @pytest.mark.asyncio
     async def test_sends_when_credentials_set(self):
         result = _make_result()
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json = MagicMock(return_value={"sid": "SM123"})
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_response)
-
         with (
-            patch.dict("os.environ", TWILIO_ENV),
-            patch("app.services.alerts.httpx.AsyncClient", return_value=mock_client),
+            patch.dict("os.environ", SMTP_ENV),
+            patch("app.services.alerts.aiosmtplib.send", new=AsyncMock()) as mock_send,
         ):
             sent = await send_alert(result)
 
         assert sent is True
-        mock_client.post.assert_called_once()
-        call_args = mock_client.post.call_args
-        # Verify correct Twilio endpoint
-        assert "ACtest123" in call_args.args[0]
-        # Verify form-encoded body (data=), not JSON
-        body = call_args.kwargs["data"]
-        assert body["From"] == "whatsapp:+14155238886"
-        assert body["To"] == "whatsapp:+521234567890"
-        assert "TEST" in body["Body"]
+        mock_send.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_uses_basic_auth(self):
-        """Twilio requires HTTP Basic Auth with (account_sid, auth_token)."""
+    async def test_email_addressed_to_smtp_user(self):
         result = _make_result()
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json = MagicMock(return_value={"sid": "SM456"})
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_response)
-
         with (
-            patch.dict("os.environ", TWILIO_ENV),
-            patch("app.services.alerts.httpx.AsyncClient", return_value=mock_client),
+            patch.dict("os.environ", SMTP_ENV),
+            patch("app.services.alerts.aiosmtplib.send", new=AsyncMock()) as mock_send,
         ):
             await send_alert(result)
 
-        call_kwargs = mock_client.post.call_args.kwargs
-        assert call_kwargs["auth"] == ("ACtest123", "authtoken456")
+        msg = mock_send.call_args.args[0]
+        assert msg["To"] == "pereiraelian18@gmail.com"
+        assert msg["From"] == "pereiraelian18@gmail.com"
 
     @pytest.mark.asyncio
-    async def test_returns_false_on_http_error(self):
-        result = _make_result()
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(side_effect=Exception("connection refused"))
-
+    async def test_subject_contains_ticker_and_scores(self):
+        result = _make_result(z_score=3.5, f_score=8)
         with (
-            patch.dict("os.environ", TWILIO_ENV),
-            patch("app.services.alerts.httpx.AsyncClient", return_value=mock_client),
+            patch.dict("os.environ", SMTP_ENV),
+            patch("app.services.alerts.aiosmtplib.send", new=AsyncMock()) as mock_send,
+        ):
+            await send_alert(result)
+
+        subject = mock_send.call_args.args[0]["Subject"]
+        assert "TEST" in subject
+        assert "3.50" in subject
+        assert "8" in subject
+
+    @pytest.mark.asyncio
+    async def test_uses_starttls_on_port_587(self):
+        result = _make_result()
+        with (
+            patch.dict("os.environ", SMTP_ENV),
+            patch("app.services.alerts.aiosmtplib.send", new=AsyncMock()) as mock_send,
+        ):
+            await send_alert(result)
+
+        kwargs = mock_send.call_args.kwargs
+        assert kwargs["hostname"] == "smtp.gmail.com"
+        assert kwargs["port"] == 587
+        assert kwargs["start_tls"] is True
+
+    @pytest.mark.asyncio
+    async def test_returns_false_on_smtp_error(self):
+        result = _make_result()
+        with (
+            patch.dict("os.environ", SMTP_ENV),
+            patch("app.services.alerts.aiosmtplib.send", new=AsyncMock(side_effect=Exception("auth failed"))),
         ):
             sent = await send_alert(result)
-
         assert sent is False
 
 
