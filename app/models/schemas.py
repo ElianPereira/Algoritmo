@@ -137,11 +137,11 @@ class DailyScreeningSummary(BaseModel):
 
 class TickerUniverse(BaseModel):
     sp500: List[str] = Field(default_factory=list)
-    bmv: List[str] = Field(default_factory=list)
+    nyse: List[str] = Field(default_factory=list)
 
     @property
     def all_tickers(self) -> List[str]:
-        return self.sp500 + self.bmv
+        return list(dict.fromkeys(self.sp500 + self.nyse))  # deduplicated
 
 
 class BatchScreenRequest(BaseModel):

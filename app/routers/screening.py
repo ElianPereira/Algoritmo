@@ -170,25 +170,30 @@ async def get_top_opportunities(
     return summary.top_opportunities[:limit]
 
 
-@router.post("/update-universe", summary="Refresh ticker universe from Wikipedia + BMV")
+@router.post("/update-universe", summary="Refresh ticker universe from Wikipedia (S&P 500 + NYSE)")
 async def update_ticker_universe() -> dict:
-    """Download S&P 500 tickers from Wikipedia and augment with BMV top stocks."""
+    """Download S&P 500 tickers from Wikipedia and augment with broad NYSE coverage."""
     try:
         sp500 = await _fetch_sp500_tickers()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to fetch S&P 500: {exc}")
 
-    bmv = _default_bmv_tickers()
-    universe = {"sp500": sp500, "bmv": bmv}
+    nyse = _default_nyse_tickers()
+    universe = {"sp500": sp500, "nyse": nyse}
     TICKERS_PATH.write_text(json.dumps(universe, indent=2))
-    return {"sp500_count": len(sp500), "bmv_count": len(bmv), "status": "updated"}
+    return {"sp500_count": len(sp500), "nyse_count": len(nyse), "status": "updated"}
 
 
 def _load_universe() -> TickerUniverse:
     if TICKERS_PATH.exists():
         data = json.loads(TICKERS_PATH.read_text())
+        # migrate legacy bmv key to nyse on first load
+        if "bmv" in data and "nyse" not in data:
+            data["nyse"] = _default_nyse_tickers()
+            del data["bmv"]
+            TICKERS_PATH.write_text(json.dumps(data, indent=2))
         return TickerUniverse(**data)
-    return TickerUniverse(sp500=_default_sp500_sample(), bmv=_default_bmv_tickers())
+    return TickerUniverse(sp500=_default_sp500_sample(), nyse=_default_nyse_tickers())
 
 
 async def _fetch_sp500_tickers() -> List[str]:
@@ -210,9 +215,36 @@ def _default_sp500_sample() -> List[str]:
     ]
 
 
-def _default_bmv_tickers() -> List[str]:
+def _default_nyse_tickers() -> List[str]:
+    """Broad NYSE-listed universe accessible via GBM+ direct US market."""
     return [
-        "WALMEX.MX", "FEMSA.MX", "GFNORTEO.MX", "AMXL.MX", "CEMEXCPO.MX",
-        "GMEXICOB.MX", "BIMBOA.MX", "GRUMAB.MX", "ALSEA.MX", "AC.MX",
-        "KIMBERA.MX", "GCARSOA1.MX", "ASURB.MX", "OMAB.MX", "VOLAR.MX",
+        # Financials
+        "JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "AXP", "USB", "TFC",
+        "PNC", "SCHW", "MCO", "ICE", "CME", "CB", "MMC", "AON", "TRV", "ALL",
+        # Healthcare
+        "JNJ", "PFE", "MRK", "ABT", "BMY", "MDT", "UNH", "ELV", "HUM", "CI",
+        "SYK", "BDX", "ZBH", "BAX", "CAH", "MCK", "ABC", "DHR", "TMO", "IQV",
+        # Energy
+        "XOM", "CVX", "COP", "SLB", "EOG", "PSX", "VLO", "MPC", "OXY", "HAL",
+        "BKR", "DVN", "HES", "MRO", "APA", "FANG", "PXD", "KMI", "WMB", "OKE",
+        # Consumer Staples
+        "PG", "KO", "PEP", "WMT", "COST", "CL", "KMB", "GIS", "K", "HRL",
+        "SJM", "MKC", "CAG", "CPB", "TSN", "KHC", "MO", "PM", "BTI", "STZ",
+        # Consumer Discretionary
+        "MCD", "NKE", "HD", "LOW", "TGT", "TJX", "ROST", "DG", "DLTR", "BBY",
+        "F", "GM", "WHR", "RL", "PVH", "HBI", "VFC", "LKQ", "AN", "KMX",
+        # Industrials
+        "GE", "CAT", "DE", "HON", "MMM", "UPS", "FDX", "LMT", "RTX", "NOC",
+        "GD", "BA", "EMR", "ETN", "PH", "ROK", "AME", "XYL", "IR", "ITW",
+        # Materials
+        "LIN", "APD", "ECL", "SHW", "PPG", "NEM", "FCX", "NUE", "STLD", "CLF",
+        "AA", "CF", "MOS", "FMC", "ALB", "CE", "EMN", "RPM", "IFF", "DD",
+        # Real Estate
+        "AMT", "PLD", "CCI", "EQIX", "SPG", "O", "AVB", "EQR", "PSA", "WY",
+        "VTR", "WELL", "ARE", "BXP", "KIM", "REG", "EXR", "CUBE", "LSI", "MAA",
+        # Utilities
+        "NEE", "DUK", "SO", "D", "AEP", "EXC", "SRE", "PCG", "ETR", "FE",
+        "XEL", "ES", "WEC", "CMS", "DTE", "PPL", "AEE", "CNP", "NI", "PNW",
+        # Technology (NYSE-listed)
+        "IBM", "HPE", "HPQ", "NCR", "DELL", "CDW", "JNPR", "NT", "GLW", "TEL",
     ]

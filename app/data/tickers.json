@@ -10,10 +10,25 @@
     "NEE", "DUK", "SO", "D", "EXC", "AEP", "SRE", "PCG", "ETR", "FE",
     "AMT", "PLD", "CCI", "EQIX", "SPG", "O", "AVB", "EQR", "PSA", "WY"
   ],
-  "bmv": [
-    "WALMEX.MX", "FEMSA.MX", "GFNORTEO.MX", "AMXL.MX", "CEMEXCPO.MX",
-    "GMEXICOB.MX", "BIMBOA.MX", "GRUMAB.MX", "ALSEA.MX", "AC.MX",
-    "KIMBERA.MX", "GCARSOA1.MX", "ASURB.MX", "OMAB.MX", "BOLSAA.MX",
-    "GENTERA.MX", "VESTA.MX", "FIBRAPL.MX", "TERRA13.MX", "FUNO11.MX"
+  "nyse": [
+    "JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "AXP", "USB", "TFC",
+    "PNC", "SCHW", "MCO", "ICE", "CME", "CB", "MMC", "AON", "TRV", "ALL",
+    "JNJ", "PFE", "MRK", "ABT", "BMY", "MDT", "UNH", "ELV", "HUM", "CI",
+    "SYK", "BDX", "ZBH", "BAX", "CAH", "MCK", "ABC", "DHR", "TMO", "IQV",
+    "XOM", "CVX", "COP", "SLB", "EOG", "PSX", "VLO", "MPC", "OXY", "HAL",
+    "BKR", "DVN", "HES", "MRO", "APA", "FANG", "PXD", "KMI", "WMB", "OKE",
+    "PG", "KO", "PEP", "WMT", "COST", "CL", "KMB", "GIS", "K", "HRL",
+    "SJM", "MKC", "CAG", "CPB", "TSN", "KHC", "MO", "PM", "BTI", "STZ",
+    "MCD", "NKE", "HD", "LOW", "TGT", "TJX", "ROST", "DG", "DLTR", "BBY",
+    "F", "GM", "WHR", "RL", "PVH", "HBI", "VFC", "LKQ", "AN", "KMX",
+    "GE", "CAT", "DE", "HON", "MMM", "UPS", "FDX", "LMT", "RTX", "NOC",
+    "GD", "BA", "EMR", "ETN", "PH", "ROK", "AME", "XYL", "IR", "ITW",
+    "LIN", "APD", "ECL", "SHW", "PPG", "NEM", "FCX", "NUE", "STLD", "CLF",
+    "AA", "CF", "MOS", "FMC", "ALB", "CE", "EMN", "RPM", "IFF", "DD",
+    "AMT", "PLD", "CCI", "EQIX", "SPG", "O", "AVB", "EQR", "PSA", "WY",
+    "VTR", "WELL", "ARE", "BXP", "KIM", "REG", "EXR", "CUBE", "LSI", "MAA",
+    "NEE", "DUK", "SO", "D", "AEP", "EXC", "SRE", "PCG", "ETR", "FE",
+    "XEL", "ES", "WEC", "CMS", "DTE", "PPL", "AEE", "CNP", "NI", "PNW",
+    "IBM", "HPE", "HPQ", "DELL", "CDW", "JNPR", "GLW", "TEL", "HPQ", "XRX"
   ]
 }
