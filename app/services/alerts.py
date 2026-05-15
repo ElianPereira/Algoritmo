@@ -14,20 +14,20 @@ If SMTP_USER / SMTP_PASSWORD are not set the service silently skips (no crash).
 from __future__ import annotations
 
 import logging
-import os
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import aiosmtplib
 
+from app.config import settings
 from app.models.schemas import RiskLevel, ScreeningResult
 
 logger = logging.getLogger(__name__)
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
-Z_SCORE_ALERT_THRESHOLD = float(os.getenv("Z_SCORE_ALERT_THRESHOLD", "3.0"))
-F_SCORE_ALERT_THRESHOLD = int(os.getenv("F_SCORE_ALERT_THRESHOLD", "7"))
+Z_SCORE_ALERT_THRESHOLD = settings.z_score_alert_threshold
+F_SCORE_ALERT_THRESHOLD = settings.f_score_alert_threshold
 
 
 def _risk_color(risk: RiskLevel) -> str:
@@ -197,11 +197,11 @@ async def send_alert(result: ScreeningResult) -> bool:
     Returns True if sent, False otherwise.
     Skips silently if credentials are not configured.
     """
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_password = os.getenv("SMTP_PASSWORD")
+    smtp_user = settings.smtp_user
+    smtp_password = settings.smtp_password
 
-    if not smtp_user or not smtp_password:
-        logger.debug("SMTP credentials not configured — skipping email alert for %s", result.ticker)
+    if not smtp_password:
+        logger.debug("SMTP_PASSWORD not configured — skipping email alert for %s", result.ticker)
         return False
 
     subject = (
