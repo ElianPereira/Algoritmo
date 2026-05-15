@@ -117,16 +117,18 @@ async def list_daily_summaries(
 
 
 @router.post("/trigger-batch", summary="Manually trigger the daily batch screening job")
+@router.get("/trigger-batch", summary="Manually trigger the daily batch screening job (browser-friendly)")
 async def trigger_batch(background_tasks: BackgroundTasks) -> dict:
     """
     Kick off a full universe batch screening run in the background.
-    Results will be persisted and Telegram alerts fired as usual.
+    Accepts both GET (browser link) and POST (API call).
+    Results are persisted to DB and email alerts fired for qualifying stocks.
     The endpoint returns immediately — poll /analytics/summaries for results.
     """
     from app.services.scheduler import run_daily_batch
 
     background_tasks.add_task(run_daily_batch)
-    return {"status": "batch_started", "message": "Full universe screening triggered. Check /analytics/summaries for results."}
+    return {"status": "batch_started", "message": "Full universe screening triggered. Qualifying stocks will be emailed to pereiraelian18@gmail.com. Check /analytics/summaries for results."}
 
 
 @router.get("/scheduler/status", summary="Current APScheduler status")
