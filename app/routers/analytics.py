@@ -123,12 +123,14 @@ async def trigger_batch(background_tasks: BackgroundTasks) -> dict:
     Kick off a full universe batch screening run in the background.
     Accepts both GET (browser link) and POST (API call).
     Results are persisted to DB and email alerts fired for qualifying stocks.
-    The endpoint returns immediately — poll /analytics/summaries for results.
+    Returns immediately — poll /analytics/summaries for results.
     """
     from app.services.scheduler import run_daily_batch
-
     background_tasks.add_task(run_daily_batch)
-    return {"status": "batch_started", "message": "Full universe screening triggered. Qualifying stocks will be emailed to pereiraelian18@gmail.com. Check /analytics/summaries for results."}
+    return {
+        "status": "batch_started",
+        "message": "Full universe screening triggered. Qualifying stocks will be emailed to pereiraelian18@gmail.com. Check /analytics/summaries for results in ~10 minutes.",
+    }
 
 
 @router.get("/scheduler/status", summary="Current APScheduler status")

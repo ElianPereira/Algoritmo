@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repository import save_many, save_screening_result
-from app.db.session import get_session
+from app.db.session import async_session_factory, get_session
 from app.models.schemas import (
     BatchScreenRequest,
     DailyScreeningSummary,
@@ -34,15 +34,12 @@ TICKERS_PATH = Path(__file__).parent.parent / "data" / "tickers.json"
 
 async def _run_full_analysis(ticker: str) -> ScreeningResult:
     """Run all analyses concurrently for a single ticker."""
-    metrics_task = calculate_altman_z_score(ticker)
-    fscore_task = calculate_piotroski_fscore(ticker)
-    valuation_task = calculate_dcf_valuation(ticker)
-    quality_task = check_cash_flow_quality(ticker)
-
     metrics, (f_score, f_breakdown), valuation, quality = await asyncio.gather(
-        metrics_task, fscore_task, valuation_task, quality_task
+        calculate_altman_z_score(ticker),
+        calculate_piotroski_fscore(ticker),
+        calculate_dcf_valuation(ticker),
+        check_cash_flow_quality(ticker),
     )
-
     metrics.f_score = f_score
     metrics.f_score_breakdown = f_breakdown
 
@@ -59,41 +56,15 @@ async def _run_full_analysis(ticker: str) -> ScreeningResult:
     )
 
 
-@router.post("/{ticker}", response_model=ScreeningResult, summary="Analyse a single ticker")
-async def screen_single_ticker(
-    ticker: str,
-    session: AsyncSession = Depends(get_session),
-) -> ScreeningResult:
-    """Full value investing analysis for one stock ticker."""
-    try:
-        clean = validate_ticker(ticker)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-
-    try:
-        result = await _run_full_analysis(clean)
-        # Persist and alert in background (don't block the response)
-        await asyncio.gather(
-            save_screening_result(session, result),
-            maybe_send_alert(result),
-        )
-        return result
-    except Exception as exc:
-        logger.error("Screening failed for %s: %s", clean, exc)
-        return ScreeningResult(ticker=clean, error=str(exc))
-
-
-@router.post("/batch", response_model=DailyScreeningSummary, summary="Batch screen a list of tickers")
-async def batch_screen(
+async def run_batch_logic(
     request: BatchScreenRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession,
 ) -> DailyScreeningSummary:
     """
-    Screen multiple tickers concurrently.
-    Returns a daily summary with top opportunities.
+    Core batch screening logic — callable from both the FastAPI router
+    (with DI session) and the scheduler (with a manually created session).
     """
-    validated = []
-    errors = []
+    validated, errors = [], []
     for t in request.tickers:
         try:
             validated.append(validate_ticker(t))
@@ -112,10 +83,7 @@ async def batch_screen(
 
     results = await asyncio.gather(*[safe_screen(t) for t in validated])
 
-    summary = DailyScreeningSummary(
-        total_screened=len(results),
-        errors=errors,
-    )
+    summary = DailyScreeningSummary(total_screened=len(results), errors=errors)
     for r in results:
         if r.error:
             summary.errors.append(f"{r.ticker}: {r.error}")
@@ -138,35 +106,57 @@ async def batch_screen(
     top.sort(key=lambda r: (r.passes_filters, r.financials.z_score or 0), reverse=True)
     summary.top_opportunities = top[:10]
 
-    # Persist all results and fire alerts concurrently
     valid_results = [r for r in results if not r.error]
     alert_tasks = [maybe_send_alert(r) for r in valid_results]
-    await asyncio.gather(
-        save_many(session, valid_results),
-        *alert_tasks,
-    )
+    await asyncio.gather(save_many(session, valid_results), *alert_tasks)
 
     return summary
 
 
+@router.post("/{ticker}", response_model=ScreeningResult, summary="Analyse a single ticker")
+async def screen_single_ticker(
+    ticker: str,
+    session: AsyncSession = Depends(get_session),
+) -> ScreeningResult:
+    """Full value investing analysis for one stock ticker."""
+    try:
+        clean = validate_ticker(ticker)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    try:
+        result = await _run_full_analysis(clean)
+        await asyncio.gather(
+            save_screening_result(session, result),
+            maybe_send_alert(result),
+        )
+        return result
+    except Exception as exc:
+        logger.error("Screening failed for %s: %s", clean, exc)
+        return ScreeningResult(ticker=clean, error=str(exc))
+
+
+@router.post("/batch", response_model=DailyScreeningSummary, summary="Batch screen a list of tickers")
+async def batch_screen(
+    request: BatchScreenRequest,
+    session: AsyncSession = Depends(get_session),
+) -> DailyScreeningSummary:
+    """Screen multiple tickers concurrently."""
+    return await run_batch_logic(request, session)
+
+
 @router.get("/opportunities/top", response_model=List[ScreeningResult], summary="Top opportunities from full universe")
 async def get_top_opportunities(
-    min_z_score: float = Query(2.0, ge=0, description="Minimum Altman Z-Score"),
-    min_f_score: int = Query(6, ge=0, le=9, description="Minimum Piotroski F-Score"),
+    min_z_score: float = Query(2.0, ge=0),
+    min_f_score: int = Query(6, ge=0, le=9),
     limit: int = Query(20, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
 ) -> List[ScreeningResult]:
-    """
-    Screens the full ticker universe and returns top value opportunities.
-    NOTE: slow endpoint (~minutes for full S&P 500). Use /screen/batch for subsets.
-    """
+    """Screens the full ticker universe and returns top value opportunities."""
     universe = _load_universe()
     tickers = universe.all_tickers[:limit * 5]
-
-    request = BatchScreenRequest(
-        tickers=tickers, min_z_score=min_z_score, min_f_score=min_f_score
-    )
-    summary = await batch_screen(request, session)
+    request = BatchScreenRequest(tickers=tickers, min_z_score=min_z_score, min_f_score=min_f_score)
+    summary = await run_batch_logic(request, session)
     return summary.top_opportunities[:limit]
 
 
@@ -187,7 +177,6 @@ async def update_ticker_universe() -> dict:
 def _load_universe() -> TickerUniverse:
     if TICKERS_PATH.exists():
         data = json.loads(TICKERS_PATH.read_text())
-        # migrate legacy bmv key to nyse on first load
         if "bmv" in data and "nyse" not in data:
             data["nyse"] = _default_nyse_tickers()
             del data["bmv"]
@@ -218,33 +207,23 @@ def _default_sp500_sample() -> List[str]:
 def _default_nyse_tickers() -> List[str]:
     """Broad NYSE-listed universe accessible via GBM+ direct US market."""
     return [
-        # Financials
         "JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "AXP", "USB", "TFC",
         "PNC", "SCHW", "MCO", "ICE", "CME", "CB", "MMC", "AON", "TRV", "ALL",
-        # Healthcare
         "JNJ", "PFE", "MRK", "ABT", "BMY", "MDT", "UNH", "ELV", "HUM", "CI",
         "SYK", "BDX", "ZBH", "BAX", "CAH", "MCK", "ABC", "DHR", "TMO", "IQV",
-        # Energy
         "XOM", "CVX", "COP", "SLB", "EOG", "PSX", "VLO", "MPC", "OXY", "HAL",
         "BKR", "DVN", "HES", "MRO", "APA", "FANG", "PXD", "KMI", "WMB", "OKE",
-        # Consumer Staples
         "PG", "KO", "PEP", "WMT", "COST", "CL", "KMB", "GIS", "K", "HRL",
         "SJM", "MKC", "CAG", "CPB", "TSN", "KHC", "MO", "PM", "BTI", "STZ",
-        # Consumer Discretionary
         "MCD", "NKE", "HD", "LOW", "TGT", "TJX", "ROST", "DG", "DLTR", "BBY",
         "F", "GM", "WHR", "RL", "PVH", "HBI", "VFC", "LKQ", "AN", "KMX",
-        # Industrials
         "GE", "CAT", "DE", "HON", "MMM", "UPS", "FDX", "LMT", "RTX", "NOC",
         "GD", "BA", "EMR", "ETN", "PH", "ROK", "AME", "XYL", "IR", "ITW",
-        # Materials
         "LIN", "APD", "ECL", "SHW", "PPG", "NEM", "FCX", "NUE", "STLD", "CLF",
         "AA", "CF", "MOS", "FMC", "ALB", "CE", "EMN", "RPM", "IFF", "DD",
-        # Real Estate
         "AMT", "PLD", "CCI", "EQIX", "SPG", "O", "AVB", "EQR", "PSA", "WY",
         "VTR", "WELL", "ARE", "BXP", "KIM", "REG", "EXR", "CUBE", "LSI", "MAA",
-        # Utilities
         "NEE", "DUK", "SO", "D", "AEP", "EXC", "SRE", "PCG", "ETR", "FE",
         "XEL", "ES", "WEC", "CMS", "DTE", "PPL", "AEE", "CNP", "NI", "PNW",
-        # Technology (NYSE-listed)
-        "IBM", "HPE", "HPQ", "NCR", "DELL", "CDW", "JNPR", "NT", "GLW", "TEL",
+        "IBM", "HPE", "HPQ", "DELL", "CDW", "JNPR", "GLW", "TEL", "HPQ", "XRX",
     ]
