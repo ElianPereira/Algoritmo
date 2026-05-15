@@ -133,7 +133,7 @@ async def calculate_piotroski_fscore(ticker: str) -> Tuple[int, dict]:
         # Current year and prior year helpers
         total_assets_vals = safe_get_multi(bs, ["Total Assets"], 2)
         if len(total_assets_vals) < 1 or not total_assets_vals[0]:
-            return 0, breakdown
+            return None, breakdown
 
         ta_now = total_assets_vals[0]
         ta_prev = total_assets_vals[1] if len(total_assets_vals) > 1 else None

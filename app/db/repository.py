@@ -73,7 +73,7 @@ async def save_daily_summary(session: AsyncSession, summary: DailyScreeningSumma
         grey_zone=summary.grey_zone,
         distress_zone=summary.distress_zone,
         top_opportunities_json=json.dumps([r.model_dump(mode="json") for r in summary.top_opportunities]),
-        errors_json=json.dumps(summary.errors),
+        errors_json=json.dumps({"errors": summary.errors, "no_data": summary.no_data_count}),
     )
     session.add(orm)
     await session.commit()

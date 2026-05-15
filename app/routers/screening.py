@@ -71,12 +71,14 @@ async def run_batch_logic(
         except ValueError as exc:
             errors.append(str(exc))
 
-    semaphore = asyncio.Semaphore(5)
+    semaphore = asyncio.Semaphore(3)
 
     async def safe_screen(t: str) -> ScreeningResult:
         async with semaphore:
             try:
-                return await _run_full_analysis(t)
+                result = await _run_full_analysis(t)
+                await asyncio.sleep(0.3)  # polite pacing to avoid Yahoo rate limits
+                return result
             except Exception as exc:
                 logger.warning("Batch error for %s: %s", t, exc)
                 return ScreeningResult(ticker=t, error=str(exc))
@@ -96,6 +98,8 @@ async def run_batch_logic(
             summary.distress_zone += 1
         elif r.risk_level == RiskLevel.grey_zone:
             summary.grey_zone += 1
+        else:
+            summary.no_data_count += 1
 
     top = [
         r for r in results

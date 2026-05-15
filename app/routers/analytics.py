@@ -47,9 +47,15 @@ def _orm_to_dict(row: ScreeningResultORM) -> dict:
 def _summary_to_dict(row: DailySummaryORM) -> dict:
     import json as _json
     errors: list = []
+    no_data: int = 0
     if row.errors_json:
         try:
-            errors = _json.loads(row.errors_json)
+            parsed = _json.loads(row.errors_json)
+            if isinstance(parsed, dict):
+                errors = parsed.get("errors", [])
+                no_data = parsed.get("no_data", 0)
+            elif isinstance(parsed, list):
+                errors = parsed  # legacy format
         except Exception:
             pass
     return {
@@ -60,6 +66,7 @@ def _summary_to_dict(row: DailySummaryORM) -> dict:
         "safe_zone": row.safe_zone,
         "grey_zone": row.grey_zone,
         "distress_zone": row.distress_zone,
+        "no_data_count": no_data,
         "error_count": len(errors),
         "errors_sample": errors[:5],
     }
@@ -139,6 +146,29 @@ async def trigger_batch(background_tasks: BackgroundTasks) -> dict:
     return {
         "status": "batch_started",
         "message": "Full universe screening triggered. Qualifying stocks will be emailed to pereiraelian18@gmail.com. Check /analytics/summaries for results in ~10 minutes.",
+    }
+
+
+@router.get("/debug/ticker/{ticker}", summary="Raw yfinance data for a single ticker (diagnostic)")
+async def debug_ticker(ticker: str) -> dict:
+    """Returns raw yfinance info keys and financial statement row labels — use to verify data availability."""
+    from app.utils.financial_data import get_financials, get_info
+    ticker = ticker.upper()
+    info = await get_info(ticker)
+    fins = await get_financials(ticker)
+
+    def df_summary(df):
+        if df is None:
+            return None
+        return {"rows": list(df.index), "columns": [str(c) for c in df.columns]}
+
+    return {
+        "ticker": ticker,
+        "info_keys": sorted(info.keys()) if info else [],
+        "info_sample": {k: info[k] for k in ["currentPrice", "marketCap", "beta", "longName"] if k in info},
+        "balance_sheet": df_summary(fins.get("balance_sheet")),
+        "income_stmt": df_summary(fins.get("income_stmt")),
+        "cashflow": df_summary(fins.get("cashflow")),
     }
 
 

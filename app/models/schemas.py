@@ -131,6 +131,7 @@ class DailyScreeningSummary(BaseModel):
     safe_zone: int = 0
     grey_zone: int = 0
     distress_zone: int = 0
+    no_data_count: int = 0  # tickers where yfinance returned insufficient data
     top_opportunities: List[ScreeningResult] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
 
