@@ -45,6 +45,13 @@ def _orm_to_dict(row: ScreeningResultORM) -> dict:
 
 
 def _summary_to_dict(row: DailySummaryORM) -> dict:
+    import json as _json
+    errors: list = []
+    if row.errors_json:
+        try:
+            errors = _json.loads(row.errors_json)
+        except Exception:
+            pass
     return {
         "id": row.id,
         "screening_date": row.screening_date.isoformat(),
@@ -53,6 +60,8 @@ def _summary_to_dict(row: DailySummaryORM) -> dict:
         "safe_zone": row.safe_zone,
         "grey_zone": row.grey_zone,
         "distress_zone": row.distress_zone,
+        "error_count": len(errors),
+        "errors_sample": errors[:5],
     }
 
 
